@@ -1,89 +1,109 @@
 import requests
+from bs4 import BeautifulSoup
 import os
 import time
-import re
+import random
+
+# --- AYARLAR ---
+TARGET_PLAYERS = ["dfp7345g", "redkid", "qahwachi", "gsk3655g", "mahmuthoca", "thorxx", "zokeytli"]
+GAME_TYPE = "tu"  # URL'deki 'g=' parametresi ve dosya ismindeki önek
+SAVE_FOLDER = "raw_games"
+
+# Siteye Chrome tarayıcı gibi görüneceğiz
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+}
+
+# Profil URL yapısı (Geçmiş sayfası: sk=2)
+BASE_PROFILE_URL = "https://www.playok.com/tr/stat.phtml?u={}&g={}&sk=2"
+BASE_DOMAIN = "https://www.playok.com"
+
+if not os.path.exists(SAVE_FOLDER):
+    os.makedirs(SAVE_FOLDER)
 
 
-def get_elo_from_content(content):
-    """
-    Metin içinden WhiteElo ve BlackElo değerlerini bulur.
-    """
+def download_txt(url):
     try:
-        # Regex ile "WhiteElo" ve "BlackElo" etiketlerini arıyoruz
-        white_match = re.search(r'\[WhiteElo "(\d+)"\]', content)
-        black_match = re.search(r'\[BlackElo "(\d+)"\]', content)
-
-        white_elo = int(white_match.group(1)) if white_match else 0
-        black_elo = int(black_match.group(1)) if black_match else 0
-
-        return white_elo, black_elo
-    except:
-        return 0, 0
+        # Direkt txt linkine istek atıyoruz
+        response = requests.get(url, headers=HEADERS)
+        if response.status_code == 200:
+            return response.text
+    except Exception as e:
+        print(f"Hata (İndirme): {e}")
+    return None
 
 
-def download_elite_games(start_id, count=50, min_elo=1800, save_dir="raw_games"):
-    """
-    Sadece belirtilen ELO üzerindeki kaliteli oyunları indirir.
-    """
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
+def process_profile(username):
+    print(f"\n--- Hedef Oyuncu: {username} Taranıyor ---")
 
-    print(f"--- ELIT İndirme Başlıyor: {start_id} ID'sinden itibaren ---")
-    print(f"--- Hedef: ELO Ortalaması {min_elo}+ olan {count} oyun ---")
+    url = BASE_PROFILE_URL.format(username, GAME_TYPE)
 
-    saved_count = 0
-    current_id = start_id
-    checked_count = 0
+    try:
+        response = requests.get(url, headers=HEADERS)
+        if response.status_code != 200:
+            print(f"Siteye girilemedi! Kod: {response.status_code}")
+            return
+    except Exception as e:
+        print(f"Bağlantı hatası: {e}")
+        return
 
-    # Hedeflenen sayıya ulaşana kadar veya çok fazla (hedefin 10 katı) deneyene kadar devam et
-    while saved_count < count and checked_count < count * 10:
-        game_id = f"tu{current_id}"
-        url = f"https://www.playok.com/p/?g={game_id}.txt"
+    soup = BeautifulSoup(response.text, 'html.parser')
 
-        try:
-            response = requests.get(url, timeout=5)
+    # Tüm linkleri al
+    links = soup.find_all('a', href=True)
 
-            if response.status_code == 200 and len(response.text) > 50:
-                content = response.text
+    found_count = 0
+    new_download_count = 0
 
-                # 1. Kontrol: Türk Daması mı?
-                if '[GameType "30' in content:
+    for link in links:
+        href = link['href']
+        link_text = link.text.strip().lower()  # Linkin görünen adı "txt" mi?
 
-                    # 2. Kontrol: ELO Yüksek mi?
-                    w_elo, b_elo = get_elo_from_content(content)
-                    avg_elo = (w_elo + b_elo) / 2
+        # Linkin içinde "/p/?g=" geçiyor mu ve yazısı "txt" mi?
+        # Senin attığın örnek: <a href="/p/?g=tu24480646.txt">txt</a>
+        if "/p/?g=" in href and "txt" in link_text:
+            try:
+                # ID'yi temizleyip alalım
+                # href örneği: /p/?g=tu24480646.txt
+                # Eşittirden sonrasını al -> tu24480646.txt
+                raw_filename = href.split("=")[-1]
 
-                    if avg_elo >= min_elo:
-                        filename = f"{save_dir}/{game_id}_elo{int(avg_elo)}.txt"
-                        with open(filename, "w", encoding="utf-8") as f:
-                            f.write(content)
+                # "tu" ve ".txt" kısımlarını atıp sadece numarayı alalım
+                game_id = raw_filename.replace(".txt", "").replace(GAME_TYPE, "")
 
-                        print(f"[+] KALİTELİ OYUN: {game_id} (Ort. ELO: {avg_elo}) -> Kaydedildi.")
-                        saved_count += 1
-                    else:
-                        # ELO düşükse kaydetme ama ekrana bilgi ver
-                        print(f"[-] Düşük ELO: {game_id} ({avg_elo}) -> Pas geçildi.")
-                else:
-                    # Türk daması değilse sessizce geç veya belirt
-                    pass
-            else:
-                print(f"[!] {game_id} boş veya yok.")
+                # Dosya ismi
+                filename = f"{SAVE_FOLDER}/game_{game_id}.txt"
 
-        except Exception as e:
-            print(f"[x] Hata: {e}")
+                found_count += 1
 
-        time.sleep(0.3)  # IP ban yememek için bekleme süresi
-        current_id += 1  # ID'yi arttır (Geleceğe git)
-        # current_id -= 1 # ID'yi azalt (Geçmişe git - İstersen bunu aç, üsttekini kapa)
-        checked_count += 1
+                # Dosya zaten var mı?
+                if os.path.exists(filename):
+                    continue
 
-    print(f"\n--- İşlem Tamamlandı ---")
-    print(f"Taranan ID sayısı: {checked_count}")
-    print(f"Kaydedilen ELIT oyun sayısı: {saved_count}")
+                # Yoksa indir
+                print(f">> İndiriliyor: {game_id}")
+
+                # İndirme linki relative (/p/...) olduğu için başına domain ekliyoruz
+                download_url = BASE_DOMAIN + href
+
+                content = download_txt(download_url)
+
+                if content:
+                    with open(filename, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    new_download_count += 1
+
+                    # Nezaket beklemesi
+                    time.sleep(1)
+
+            except Exception as e:
+                print(f"Link işleme hatası: {e}")
+                continue
+
+    print(f"Bitti: {username} için {found_count} oyun bulundu, {new_download_count} tanesi indirildi.")
 
 
-if __name__ == "__main__":
-    # Başlangıç ID'sini senin dediğin yere çektik.
-    # count=50: Bize şimdilik 50 tane sağlam maç yeter, boru hattını test edeceğiz.
-    # min_elo=1700: Çıtayı biraz yüksek tutalım, ustaları izlesin.
-    download_elite_games(start_id=24000000, count=50, min_elo=1700)
+# --- ANA ÇALIŞTIRMA ---
+for player in TARGET_PLAYERS:
+    process_profile(player)
+    time.sleep(random.uniform(2, 4))
