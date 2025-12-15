@@ -5,18 +5,20 @@ import time
 import random
 
 # --- AYARLAR ---
-TARGET_PLAYERS = ["dfp7345g", "redkid", "qahwachi", "gsk3655g", "mahmuthoca", "thorxx", "zokeytli"]
-GAME_TYPE = "tu"  # URL'deki 'g=' parametresi ve dosya ismindeki önek
-SAVE_FOLDER = "raw_games"
+# Hedef oyuncu listeni buraya sağlam doldur dayı.
+#cebeci060
+TARGET_PLAYERS = ["dfp7345g", "redkid", "qahwachi", "gsk3655g", "mahmuthoca", "thorxx", "zokeytli", "asafbey", "fmu", "neco8866", "khak", "arapkadri", "sansiro", "hocakeskin"]
 
-# Siteye Chrome tarayıcı gibi görüneceğiz
+GAME_TYPE = "tu"
+SAVE_FOLDER = "raw_games"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
 
-# Profil URL yapısı (Geçmiş sayfası: sk=2)
-BASE_PROFILE_URL = "https://www.playok.com/tr/stat.phtml?u={}&g={}&sk=2"
 BASE_DOMAIN = "https://www.playok.com"
+
+# DÜZELTME BURADA: &pg değil &page yaptık!
+BASE_PROFILE_URL = "https://www.playok.com/tr/stat.phtml?u={}&g={}&sk=2&page={}"
 
 if not os.path.exists(SAVE_FOLDER):
     os.makedirs(SAVE_FOLDER)
@@ -24,86 +26,88 @@ if not os.path.exists(SAVE_FOLDER):
 
 def download_txt(url):
     try:
-        # Direkt txt linkine istek atıyoruz
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url, headers=HEADERS, timeout=10)
         if response.status_code == 200:
             return response.text
-    except Exception as e:
-        print(f"Hata (İndirme): {e}")
-    return None
+    except:
+        return None
 
 
-def process_profile(username):
-    print(f"\n--- Hedef Oyuncu: {username} Taranıyor ---")
+def process_player_history(username):
+    print(f"\n--- {username} İÇİN GERÇEK TARİH KAZISI ---")
 
-    url = BASE_PROFILE_URL.format(username, GAME_TYPE)
+    # PlayOK sayfalama mantığına göre 1'den başlatalım
+    page_num = 1
+    total_downloaded_for_player = 0
+    consecutive_empty_pages = 0
 
-    try:
-        response = requests.get(url, headers=HEADERS)
-        if response.status_code != 200:
-            print(f"Siteye girilemedi! Kod: {response.status_code}")
-            return
-    except Exception as e:
-        print(f"Bağlantı hatası: {e}")
-        return
+    while True:
+        current_url = BASE_PROFILE_URL.format(username, GAME_TYPE, page_num)
+        print(f"  >> {username} - Sayfa {page_num} taranıyor...")
 
-    soup = BeautifulSoup(response.text, 'html.parser')
+        try:
+            response = requests.get(current_url, headers=HEADERS, timeout=10)
+            if response.status_code != 200:
+                print("    ! Sayfaya erişilemedi.")
+                break
+        except:
+            print("    ! Bağlantı hatası.")
+            break
 
-    # Tüm linkleri al
-    links = soup.find_all('a', href=True)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        links = soup.find_all('a', href=True)
 
-    found_count = 0
-    new_download_count = 0
+        games_found_on_page = 0
+        new_downloads_on_page = 0
 
-    for link in links:
-        href = link['href']
-        link_text = link.text.strip().lower()  # Linkin görünen adı "txt" mi?
+        for link in links:
+            href = link['href']
+            text = link.text.strip().lower()
 
-        # Linkin içinde "/p/?g=" geçiyor mu ve yazısı "txt" mi?
-        # Senin attığın örnek: <a href="/p/?g=tu24480646.txt">txt</a>
-        if "/p/?g=" in href and "txt" in link_text:
-            try:
-                # ID'yi temizleyip alalım
-                # href örneği: /p/?g=tu24480646.txt
-                # Eşittirden sonrasını al -> tu24480646.txt
-                raw_filename = href.split("=")[-1]
+            # Link txt mi?
+            if "/p/?g=" in href and "txt" in text:
+                games_found_on_page += 1
 
-                # "tu" ve ".txt" kısımlarını atıp sadece numarayı alalım
-                game_id = raw_filename.replace(".txt", "").replace(GAME_TYPE, "")
+                try:
+                    raw_filename = href.split("=")[-1]
+                    game_id = raw_filename.replace(".txt", "").replace(GAME_TYPE, "")
+                    filename = f"{SAVE_FOLDER}/game_{game_id}.txt"
 
-                # Dosya ismi
-                filename = f"{SAVE_FOLDER}/game_{game_id}.txt"
+                    # ZATEN VARSA
+                    if os.path.exists(filename):
+                        continue
 
-                found_count += 1
+                        # YOKSA İNDİR
+                    download_url = BASE_DOMAIN + href
+                    content = download_txt(download_url)
 
-                # Dosya zaten var mı?
-                if os.path.exists(filename):
+                    if content:
+                        with open(filename, "w", encoding="utf-8") as f:
+                            f.write(content)
+                        total_downloaded_for_player += 1
+                        new_downloads_on_page += 1
+
+                except:
                     continue
 
-                # Yoksa indir
-                print(f">> İndiriliyor: {game_id}")
+        # --- KONTROL ---
+        if games_found_on_page == 0:
+            print(f"    ! Sayfa {page_num} boş (veya oyun linki yok). Bitiyor.")
+            consecutive_empty_pages += 1
+        else:
+            print(f"    + Sayfada {games_found_on_page} oyun var. {new_downloads_on_page} tanesi YENİ indirildi.")
+            consecutive_empty_pages = 0
 
-                # İndirme linki relative (/p/...) olduğu için başına domain ekliyoruz
-                download_url = BASE_DOMAIN + href
+        # 2 boş sayfa gelirse bitir (Garanti olsun)
+        if consecutive_empty_pages >= 2:
+            print(f"--- {username} tamamlandı. Toplam {total_downloaded_for_player} yeni oyun cepte. ---")
+            break
 
-                content = download_txt(download_url)
-
-                if content:
-                    with open(filename, "w", encoding="utf-8") as f:
-                        f.write(content)
-                    new_download_count += 1
-
-                    # Nezaket beklemesi
-                    time.sleep(1)
-
-            except Exception as e:
-                print(f"Link işleme hatası: {e}")
-                continue
-
-    print(f"Bitti: {username} için {found_count} oyun bulundu, {new_download_count} tanesi indirildi.")
+        page_num += 1
+        time.sleep(random.uniform(1.0, 2.0))  # Nezaket beklemesi
 
 
 # --- ANA ÇALIŞTIRMA ---
 for player in TARGET_PLAYERS:
-    process_profile(player)
-    time.sleep(random.uniform(2, 4))
+    process_player_history(player)
+    time.sleep(3)
