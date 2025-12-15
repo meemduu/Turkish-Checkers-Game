@@ -155,18 +155,36 @@ class Game:
         if not self.selected or (row, col) not in self.valid_moves:
             return False
 
-        # Taşı yeni konumuna taşı
+        # 1. Hamle öncesi durumu kaydet
+        was_king = self.selected.king
+
+        # 2. Taşı yeni konumuna taşı (Burada dama olabilir)
         self.board.move(self.selected, row, col)
+
+        # 3. Hamle sonrası durumu kontrol et
+        is_now_king = self.selected.king
+
         skipped = self.valid_moves[(row, col)]  # Yenen taşları al
 
         if skipped:
             self.board.remove(skipped)  # Yenen taşları tahtadan kaldır
 
+            # --- KRİTİK DÜZELTME BURASI ---
+            # Eğer taş bu hamlede dama olduysa (ve önceden değildiyse),
+            # taş yeme hakkı olsa bile tur BİTER.
+            if not was_king and is_now_king:
+                self.change_turn()
+                return True
+            # ------------------------------
+
             # Hamleden sonra tekrar yeme şansı var mı?
             self.valid_moves = self.board.get_valid_moves(self.selected)
 
             # Eğer tekrar yeme imkanı varsa ve mevcut hamle en fazla taş yiyen hamlelerden biriyse devam et
-            max_captures = max(len(v) for v in all_moves.values() if v)  # En fazla taş yiyen hamlenin sayısı
+            max_captures = 0
+            if all_moves:
+                max_captures = max(len(v) for v in all_moves.values() if v)
+
             if any(self.valid_moves.values()) and len(skipped) == max_captures:
                 return True  # Oyuncu tekrar oynamalı
 

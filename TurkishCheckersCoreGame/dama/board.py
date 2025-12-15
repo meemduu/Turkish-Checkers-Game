@@ -66,7 +66,7 @@ class Board:
         
         return None
     
-      def evaluate(self):
+    def evaluate(self):
         return self.black_left - self.white_left + (self.black_kings * 2 - self.white_kings * 2)
 
     
